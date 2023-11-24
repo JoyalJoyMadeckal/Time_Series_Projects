@@ -1,0 +1,661 @@
+---
+title: "MATH1318 Time Series Analysis"
+author: ""
+subtitle: "Final Project"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+---
+
+
+```{r,warning=FALSE,message=FALSE}
+library(TSA)
+library(timeDate)
+library(tseries)
+
+library(TSA)
+library(fUnitRoots)
+library(forecast)
+library(CombMSC)
+# rm(list=ls())
+
+
+library(lmtest)
+# library(FitAR)
+library(bestglm)
+library(ltsa)
+
+sort.score <- function(x, score = c("bic", "aic")){
+  if (score == "aic"){
+    x[with(x, order(AIC)),]
+  } else if (score == "bic") {
+    x[with(x, order(BIC)),]
+  } else {
+    warning('score = "x" only accepts valid arguments ("aic","bic")')
+  }
+}
+residual.analysis <- function(model, std = TRUE,start = 2, class = c("ARIMA","GARCH","ARMA-GARCH", "fGARCH")[1]){
+  library(TSA)
+  # library(FitAR)
+  if (class == "ARIMA"){
+    if (std == TRUE){
+      res.model = rstandard(model)
+    }else{
+      res.model = residuals(model)
+    }
+  }else if (class == "GARCH"){
+    res.model = model$residuals[start:model$n.used]
+  }else if (class == "ARMA-GARCH"){
+    res.model = model@fit$residuals
+  }else if (class == "fGARCH"){
+    res.model = model@residuals
+  }else {
+    stop("The argument 'class' must be either 'ARIMA' or 'GARCH' ")
+  }
+  par(mfrow=c(3,2))
+  plot(res.model,type='o',ylab='Standardised residuals', main="Time series plot of standardised residuals")
+  abline(h=0)
+  hist(res.model,main="Histogram of standardised residuals")
+  qqnorm(res.model,main="QQ plot of standardised residuals")
+  qqline(res.model, col = 2)
+  acf(res.model,main="ACF of standardised residuals")
+  print(shapiro.test(res.model))
+  k=0
+  # LBQPlot(res.model, lag.max = 30, StartLag = k + 1, k = 0, SquaredQ = FALSE)
+  par(mfrow=c(1,1))
+}
+
+# setwd("C:/Users/Ajay Krishnan/OneDrive/RMIT/Sem3/Time Series/Assignments/Assignment 3/New folder")
+
+#Reading the CSV file
+electric_data <- read.csv("Electric_Production.csv", header = TRUE)
+head(electric_data)
+class(electric_data)
+
+electric_data <- subset (electric_data, select = -DATE)
+
+#Checking Dimensions of the data
+dim(electric_data)
+str(electric_data)
+
+#Checking summary of the data
+summary(electric_data)
+par(mfrow=c(1,1))
+ts_electric_data <- ts(as.vector(electric_data),start = c(1985,1), end=c(2018,1), frequency = 12)
+plot(ts_electric_data,type='o')
+acf(ts_electric_data,lag.max = 100)
+ts_electric_data <- ts(as.vector(electric_data),start = c(1,1), frequency = 6)
+ts_electric_data
+class(ts_electric_data)
+dim(ts_electric_data)
+
+par(mfrow=c(1,1)) 
+#Time Series plot for Electric production data
+plot(ts_electric_data,type='o',ylab ='Electric production(Annual Data)', xlab = 'Years',
+     main = " Time series plot for Electric production")
+
+#Scatter plot for first Electric production data
+plot(y=ts_electric_data,x=zlag(ts_electric_data),ylab ='Electric production(Annual Data)', xlab = "Years", main = " Scatter plot for first lag Antarctica land ice mass")
+
+#Checking correlation of first lag
+y = ts_electric_data
+x = zlag(ts_electric_data)
+# Create an index to get rid of the first NA value in x
+index = 2:length(x)
+# Calculate correlation between numerical values in x and y
+cor(y[index],x[index])
+
+#Function1
+easyFunction <- function(Data, FigureNumber) {
+  # Plot the ACF and PACF plots of time series data 
+  par(mfrow=c(1,1)) 
+  
+  #QQ Plot
+  qqnorm(Data, main = paste( paste("Figure",FigureNumber+1),": Electric production" ))
+  qqline(Data, col = 2)
+  acf=acf(Data, lag.max= 50, main = paste( paste("Figure",FigureNumber+2),": ACF plot for Electric production", xlab="lags"))
+  pacf=pacf(Data, main = paste( paste("Figure",FigureNumber+3),": PACF plot for Electric production", xlab="lags"))
+  print(acf)
+  print(pacf)
+  #Dickey-Fuller Test
+  adf.test(Data)
+  #adf.test(Data, k=1, alternative = c("stationary"))
+  #adf.test(Data, k=3, alternative = c("stationary"))
+  
+  
+  #Shapiro walk Test
+  shapiro.test(Data)
+} 
+easyFunction(ts_electric_data,2)
+
+#PP Test
+pp.test(ts_electric_data)
+
+#Box cox transformation
+BC <- BoxCox.ar(ts_electric_data,lambda = seq(-1, 0.5, 0.01) ) #,lambda = seq(-1, 0.5, 0.01) If you get an error.
+BC$ci
+lambda <- BC$lambda[which(max(BC$loglike) == BC$loglike)]
+lambda
+# 
+BC.electric_ts_data = (ts_electric_data^lambda-1)/lambda
+
+#Time Series plot for Electric production data after box cox transforamtion
+plot(BC.electric_ts_data,type='o',ylab ='Electric production(Annual Data)', xlab = 'Years',
+     main = " Time series plot for Electric production")
+
+```
+
+## Seasonal Modeling
+
+We observe that the time series plot has trend as well as seasonality(repeating pattern).We use SARIMA Models to capture time series with seasonality & trend.Seasonal Differencing is used to deal with non-stationary seasonal data.
+If the mean of time series is not constant over time it is said to be non-stationary.
+
+
+SARIMA(p,d,q) X (P,D,Q)s
+
+P:AR order
+
+d:The number of ordinary differences
+
+q:MA order
+
+
+P:Seasonal AR Order
+
+D:The number of seasonal differences
+
+Q:Seasonal MA Order
+
+s:Period
+
+Here, 
+If we look at the Seasonal Lags of PACF & ACF we get P & Q respectively and from the Lags before First Seasonal Lag we get p,q.
+
+
+Seasonal Difference of Period s for Series Yt is,
+∇sYt=Yt-Yt-s
+
+
+For Seasonality, its better to check ACF & Pacf.
+
+```{r,warning=FALSE,message=FALSE}
+par(mfrow=c(1,2))
+acf(BC.electric_ts_data, main ="ACF plot for Electric production")
+pacf(BC.electric_ts_data, main ="PACF plot for Electric production")  
+```
+
+
+From the ACF & PACF plot we observe that there is a wave pattern and a slowing decaying pattern at seasons.We have significant seasonal lags at 1,2,3... of ACF plot and a very high first lag in PACF. Significant lags with slowing decaying pattern shows us Seasonal trend.So we need to deal with seasonality & Seasonal trend.
+
+We would be following the residual approach as we know Whatever is not captured by the Model goes into the residuals. So we look at the residuals and try to improve/tweak the model.
+
+In our seasonal series, we have a variety of elements we observe Ordinary trend, seasonal trend, ordinary Autocorrelation, and seasonal Autocorrelation. Whatever is left after we capture the seasonal trend goes to the residuals. Then we examine the residuals to see what's left, fit the model again, and check what's left, one characteristic at a time.
+When we have the perfect model, the residuals will be white noise because the models will have captured everything.
+
+### Seasonal Differening
+
+In the ACF, the effect of seasonal trend can be observed. As a result, we'll fit a plain model with D = 1 and examine the residuals.
+We always start with D=1, because we know there is a seasonal tendency, and we set D=1 to remove it. The rest of the models parameters are set to 0.As a result, the seasonal trend is removed, and the rest is captured by the residuals.
+
+```{r,warning=FALSE,message=FALSE}
+FitSeasonalModel <- function(TimeSeries,p,d,q,P,D,Q,period,FigureNumber) { 
+model = arima(BC.electric_ts_data,order=c(p,d,q),seasonal=list(order=c(P,D,Q), 
+                                                               period=period))
+residual = residuals(model);  
+par(mfrow=c(1,1))
+plot(residual,xlab='Time',ylab='Residuals', main =paste( paste("Figure",FigureNumber),":
+Time series plot of the residuals "))
+par(mfrow=c(1,2))
+acf(residual, lag.max = 40, main =paste( paste("Figure",FigureNumber+1),":
+ACF of residuals "))
+pacf(residual, lag.max = 40, main = paste( paste("Figure",FigureNumber+2),":
+PACF of residuals "))
+return(residual)
+}
+```
+
+#### Fitting Model with D=1
+
+```{r,warning=FALSE,message=FALSE}
+res.m1=FitSeasonalModel(BC.electric_ts_data,p=0,d=0,q=0,P=0,D=1,Q=0,period = 6,FigureNumber = 1)
+```
+
+
+We can see that in the Time Series Plot of the residuals  we don't have the trend anymore.The seasonal differencing has captured the trend well.After doing D=1 we still can see that the slowing Decreasing pattern in seasons in the ACF plot of residuals.We can even try second differencing and check if it has any effect on the ACF (If it doesn't pan out we can still proceed and try to fit other models)
+
+
+#### Fitting Model with D=2,3
+```{r,warning=FALSE,message=FALSE}
+res.m1_2ndDiff=FitSeasonalModel(BC.electric_ts_data,p=0,d=0,q=0,P=0,D=2,Q=0,period = 6,FigureNumber = 1)
+res.m1_3rdDiff=FitSeasonalModel(BC.electric_ts_data,p=0,d=0,q=0,P=0,D=3,Q=0,period = 6,FigureNumber = 1)
+```
+
+
+We observe even after 2nd/3rd seasonal differencing there is no effect on the seasonal lags of ACF, so we can consider Q=0 (because of pattern).From the first differencing **FIgureX** we observe that PACF has significant seasonal lags at 1,3 & 5. So we set the values of P=3.
+We get P=3,D=1,Q=0 from the ACF & PACF Plot.
+
+
+Note:
+we get P from PACF and Q from ACF.For P & Q we see seasonal lags.
+
+
+We fit the new model from what we got on top of the previous model , we still have pdq as 0 but we have the seasonal parts.
+SARIMA(0,0,0)x(3,1,0)6
+
+#### Fitting Model with P=3,D=1,Q=0
+```{r,warning=FALSE,message=FALSE}
+res.m2=FitSeasonalModel(BC.electric_ts_data,p=0,d=0,q=0,P=3,D=1,Q=0,period = 6,FigureNumber = 1)
+```
+
+
+Since we captured all the seasonal Autocorrelation as we fit the seasonal part of model,what remains is ordinary Part.We observe that we still have seasonal lags left(lag 2 & 4), we could try and increase the seasonal orders to capture the significant lag (but we wont mind now). In the time series plot of residuals we see all random fluctuations(no trend)
+
+
+
+
+### Ordinary Differencing
+Now we will focus on the section between 0 & 1 lag of ordinary part.
+We have many significant lags in ACF & a very high first lag in PACF(between lag 0 & 1) which tells us we might have trend in series. So we set d=1 and fit the model.
+
+#### Fitting Model with d=1, P=3,D=1,Q=0
+```{r,warning=FALSE,message=FALSE}
+res.m3=FitSeasonalModel(BC.electric_ts_data,p=0,d=1,q=0,P=3,D=1,Q=0,period = 6,FigureNumber = 1)
+```
+
+From the ACF & PACF plot of residuals we observe that we have 3 significant lags in ACF plot between 0 & 1 and 4 significant lags in PACF Plot. So we set p=4 & q=3.We also observe that the time series plot of residuals is now stationary and there is only random fluctuations around the mean.To confirm the stationary we can do ADF test.
+
+#### ADF Test
+```{r,warning=FALSE,message=FALSE}
+adf.test(BC.electric_ts_data, alternative = c("stationary"))
+```
+After performing the differencing and removing the trend we observe that the series is stationary as we get p value of 0.01 (<0.05)in adf  test
+
+#### Fitting Model with p=4,d=1,q=3,P=3,D=1,Q=0
+```{r,warning=FALSE,message=FALSE}
+res.m4=FitSeasonalModel(BC.electric_ts_data,p=4,d=1,q=3,P=3,D=1,Q=0,period = 6,FigureNumber = 1)
+```
+
+When we plot the reisidual of the model, we observe there is nothing left behind and its white noise(except the significant lag at 2 & 4).We can check the significance of those lag using Ljung Box Test.
+
+#### Ljung Box Test
+```{r,warning=FALSE,message=FALSE}
+# LBQPlot(res.m4)
+```
+
+From the Ljung Box test it is evident that the lags 2 & 4 are not that significant as its above the reference line.
+
+
+
+## Model Speciication
+
+
+We use ACF/PACF, EACF and BIC table to get possible models for the specification of ordinary lags.
+
+We don't have many options for the seasonal parts but for the ordinary parts, we can specify a set of feasible models.
+As a result, rather than using the latest model, which captures all autocorrelation, we use one previous model to specify the range of models that can be used (Because all of the Models' parameters have already been set, only white noise remains after the last model).
+
+### ACF - PACF
+
+From the ACF & PACF Plot we get SARIMA(4,1,3)x(3,1,0) model
+
+### EACF
+
+The extended autocorrelation (EACF) approach is one method for establishing the order of auto-regressive and moving average components in ARMA models. Eacf offers good sampling properties for somewhat large sample sizes.
+In a table, an ARMA(p,q) process will have a pattern of a triangle of zeroes. The vertex of the top left triangle generated in the set of continuous zeros yields the values of p and q.
+
+
+```{r,warning=FALSE,message=FALSE}
+eacf(res.m3)
+```
+
+We can see from the table that the continuous zeros vertex is in the second line, and the top left corresponds to (1,2). The ARMA Model's P and Q values are obtained from there. The AR component is represented by P, and the MA component is represented by q.
+
+The tentative models from Eacf are:
+
+* SARIMA(1,1,2)x(3,1,0)_6 
+* SARIMA(1,1,3)x(3,1,0)_6 
+* SARIMA(2,1,2)x(3,1,0)_6
+
+### BIC
+
+Akaike's Information Criterion is one of the most extensively utilised information criterion for model formulation and selection (AIC). The model with the lowest AIC is prefered by AIC.
+The AIC and BIC models are based on penalising models based on coefficients.
+AIC just considers the number of coefficients, but BIC (Bayesian Information) considers the number of observations in the series as well.
+We choose BIC because it considers both the number of observations in the series and the number of coefficients, resulting in a more accurate estimate of good models.
+
+```{r,warning=FALSE,message=FALSE}
+par(mfrow=c(1,1))
+bic_table = armasubsets(y=res.m3,nar=10,nma=10,y.name='p',ar.method='ols')
+plot(bic_table)
+```
+
+It is a good practice to go with smaller models because Smaller models have fewer model coefficients, and smaller models have a higher likelihood of having all **significant model coefficients** than larger models.
+
+In each row of the table, the cells of the variables chosen for the model are shaded. Better models (lower BIC) are in higher rows and darker tiles, whereas worse models (higher BIC) are in lower rows and lighter shades.
+
+The  models from Bic are,
+
+* SARIMA(1,1,3)x(3,1,0)_6 
+* SARIMA(2,1,3)x(3,1,0)_6
+* SARIMA(4,1,3)x(3,1,0)_6 
+* SARIMA(5,1,3)x(3,1,0)_6
+* SARIMA(1,1,6)x(3,1,0)_6
+* SARIMA(2,1,6)x(3,1,0)_6
+* SARIMA(4,1,6)x(3,1,0)_6  
+* SARIMA(5,1,6)x(3,1,0)_6
+* SARIMA(3,1,3)x(3,1,0)_6
+
+
+The models we get from the Model specification tools are:
+
+* SARIMA(4,1,3)x(3,1,0)_6 (PACF/ACF & (BIC))
+* SARIMA(1,1,2)x(3,1,0)_6 (EACF)
+* SARIMA(1,1,3)x(3,1,0)_6 (EACF & BIC)
+* SARIMA(2,1,2)x(3,1,0)_6 (EACF)
+* SARIMA(2,1,3)x(3,1,0)_6 (BIC)
+* SARIMA(5,1,3)x(3,1,0)_6 (BIC)
+* SARIMA(1,1,6)x(3,1,0)_6 (BIC)
+* SARIMA(2,1,6)x(3,1,0)_6 (BIC)
+* SARIMA(4,1,6)x(3,1,0)_6 (BIC)
+* SARIMA(5,1,6)x(3,1,0)_6 (BIC)
+* SARIMA(3,1,3)x(3,1,0)_6 (BIC)
+
+## Model Significance
+
+We have obtained the set of 11 models which will be suiting for our time series data. But, we cannot proceed with all the models for the forecasting purpose. The models has to be analysed thoroughly to understand which models will be suiting our time series data for a better forecast. The significance of each of the models will be analysed in this section.
+
+```{r, warning=FALSE}
+# Creation of the data frame which stores the error measures of the models
+error_df <- data.frame(matrix(ncol = 7, nrow = 0))
+colnames(error_df) <- c("ME", "RMSE", "MAE", "MPE", "MAPE", "MASE", "ACF1")
+
+# The function will fit the model and will be providing us with the significance of the coefficients.
+# Along with that the function will update error measures of each of the models to the common
+# data frame.
+model.significance.and.error.measures <- function(p, d, q, P, D, Q, method) {
+  model <-  arima(BC.electric_ts_data, order=c(p, d, q),
+                  seasonal=list(order=c(P, D, Q), period=6),
+                  method = method)
+  print(coeftest(model))
+  
+  if (method == "ML" || method == "CSS-ML") {
+    model.error.measures <- Arima(BC.electric_ts_data, order=c(p, d, q),
+                                seasonal=list(order=c(P, D, Q), period=6),
+                                method = method)
+    row.to.be.added <- nrow(error_df) + 1
+    error_df[row.to.be.added, ] <<- accuracy(model.error.measures)[1:7]
+    row.names(error_df)[row.to.be.added] <<- paste("SARIMA", p, d, q, "(3,1,0)")
+  }
+
+  return(model)
+}
+```
+
+We will analyse the models one by one. The general structure of the analysis will be as below.
+
+* Fit the model (arima) including both CSS and ML methods
+* Analyse the significance of the coefficients
+* Get the residuals of the model and analyse the plot, histogram, normality and ACF of the standardised residuals
+
+### SARIMA(4,1,3)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_413_CSS <- model.significance.and.error.measures(4,1,3,3,1,0,"CSS")
+residual.analysis(model = model_413_CSS)
+
+model_413_ML <- model.significance.and.error.measures(4,1,3,3,1,0,"ML")
+residual.analysis(model = model_413_ML)
+```
+
+* The model is huge having 4 AR parameters, 3 MA parameters and 3 seasonal AR parameters. So, we can say that **Principle of Parsimony** doesn't suggest to take this model unless we don't have any lower order good model.
+* All the 3 seasonal AR parameters are significant. But, most of the AR and MA parameters are not significant. This itself tells us this is not a good model.
+* Now, from the residual analysis we can see that the time series plot appear to be random.
+* Histogram shows a normal trend. The Q-Q plot is close to normality. Shapiro test confirms the normality assumption. Hence, ML based model results are reliable.
+* In the ACF of the standardised residuals we suspect some significant lags. But, this is ruled out with Ljung-Box test.
+
+### SARIMA(1,1,2)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_112_CSS <- model.significance.and.error.measures(1,1,2,3,1,0,"CSS")
+residual.analysis(model = model_112_CSS)
+
+model_112_ML <- model.significance.and.error.measures(1,1,2,3,1,0,"CSS-ML")
+residual.analysis(model = model_112_ML)
+```
+
+* The model is comparatively smaller when compared with previous model with just 1 AR parameter and 2 MA parameters. 
+* Both CSS and ML methods say that the AR parameter, 3 seasonal AR parameters and 1 MA parameter is relevant. One MA parameter is not relevant and it is the higher order parameter. We cannot say it is a bad model but if there is another model with the higher order MA parameter significant and lower order MA parameter insignificant, we would be choosing that model over this model.
+* Now, from the residual analysis we can see that the time series plot appear to be random.
+* Histogram shows a normal trend. The Q-Q plot is nearly close to normality. Also, the Shapiro test confirms the normality. Hence, ML based model results are reliable.
+* In the ACF of the standardized residuals we suspect some significant lags at lag 4. The Ljung-Box test we have performed is saying that the lags are significant thereby indicating that `some of the information of the data is not captured by the model.
+* So, we can say that this model is not a good candidate.
+
+### SARIMA(1,1,3)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_113_CSS <- model.significance.and.error.measures(1,1,3,3,1,0,"CSS")
+residual.analysis(model = model_113_CSS)
+
+model_113_ML <- model.significance.and.error.measures(1,1,3,3,1,0,"CSS-ML")
+residual.analysis(model = model_113_ML)
+```
+
+* This model also can be considered as a small model. It is having 1 AR parameter, 3 MA parameters and 3 seasonal AR parameters.
+* When we fit the model using CSS and CSS-ML methods we can see that except the second MA parameter all the other parameters are relevant. Even though the second MA parameter is insignificant we can see that the third MA parameter is significant. As the higher order MA parameter is significant we can neglect the lower order MA parameter which is significant. This gives us the confidence that this model will be a good one.
+* From the residual analysis we can see that the time series plot appear to be random.
+* Histogram of standardized residuals is very close to normality which is confirmed by the Q-Q plot. The Shapiro test also suggests the same.
+* The ACF plot is showing us some significant lags. But when we look at the Ljung-Box plot we can see that, the lags which are shown significant in the ACF plot are not really significant. So, the model is able to capture almost all information from the time series data.
+* The model is a good candidate. 
+
+### SARIMA(2,1,2)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_212_CSS <- model.significance.and.error.measures(2,1,2,3,1,0,"CSS")
+residual.analysis(model = model_212_CSS)
+
+model_212_ML <- model.significance.and.error.measures(2,1,2,3,1,0,"ML")
+residual.analysis(model = model_212_CSS)
+```
+
+* The model is almost the same size as of the the previous model having 2 AR parameters, 2 MA parameters and 3 seasonal AR parameters.
+* From the coefficient test conducted with CSS and ML methods we can see that the first AR and MA parameters are not significant (In CSS the MA parameter is showing significance by a marginal value). As the higher order paramaters are significant the model is not that bad.
+* The standardized residuals plot seems to be white noise.
+* Histogram is nearly normal and almost all the points are falling in the reference line in the Q-Q plot. The Shapiro test also confirms the normality of the residuals. So, results based on ML method is reliable.
+* Even though the ACF plot shows us some significant lags, we can see Ljung-Box test tells us that there are no significant lags.
+* The model can be considered as a good candidate.
+
+### SARIMA(2,1,3)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_213_CSS <- model.significance.and.error.measures(2,1,3,3,1,0,"CSS")
+residual.analysis(model = model_213_CSS)
+
+model_213_ML <- model.significance.and.error.measures(2,1,3,3,1,0,"ML")
+residual.analysis(model = model_213_ML)
+```
+
+* The model is bigger when compared with the previous model having 2 AR parameters, 3 MA parameters and 3 seasonal AR parameters. But it is not as big as the first model.
+* Both CSS and ML method model fitting shows that the higher order MA parameter and lower order AR parameters are insignificant. So, the model from point of parameter significance is not that good when compared with other models.
+* The residuals appear to be white noise from the plot.
+* Normality of the residuals is confirmed by the histogram, Q-Q plot and Shapiro test.
+* The significant lags shown in the ACF plot, are not significant when we perform the Ljung-Box test.
+* The model is good but not as good as the previous smaller models (113 and 212).
+
+### SARIMA(5,1,3)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_513_CSS <- model.significance.and.error.measures(5,1,3,3,1,0,"CSS")
+residual.analysis(model = model_513_CSS)
+
+model_513_ML <- model.significance.and.error.measures(5,1,3,3,1,0,"ML")
+residual.analysis(model = model_513_ML)
+```
+
+* The model is huge having 5 AR parameters, 3 MA parameters and 3 MA seasonal parameters. Based in the **Principle of Parsimony** this may not be a good model for our data as we are having good smaller models.
+* From model fitting, we can see that there are so many NaN values associated with the p-values of the coefficients. This is because the standard error is becoming NaN. Anyway, we cannot see whether the coefficients are significant or not. So, this model is not a good one for our data.
+* Normality of residuals is evident in the histogram, Q-Q plot and Shapiro test.
+* Similar to the previous model the significant lags shown in ACF need not be considered significant from Ljung-Box test.
+* Overall, we can say that the model is not a good candidate.
+
+### SARIMA(1,1,6)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_116_CSS <- model.significance.and.error.measures(1,1,6,3,1,0,"CSS")
+residual.analysis(model = model_116_CSS)
+
+model_116_ML <- model.significance.and.error.measures(1,1,6,3,1,0,"CSS-ML")
+residual.analysis(model = model_116_ML)
+```
+
+* This model is also huge since it is having 1 AR parameter, 5 MA parameters and 3 seasonal MA parameters. Like the previous model, principle of parsimony suggests this model is not a good candidate.
+* In model fitting, CSS suggests there are insignificant MA parameters and CSS-ML suggests that there are 4 insignificant MA parameters. This itself shows the model is not good for our purpose.
+* White noise is visible in the residuals plot.
+* Histogram and Q-Q plot suggests the residuals are normal. Shapiro test suggests its normal in CSS-ML method and not normal via CSS method. But, as normality is visible we can treat it as normal.
+* ACF plot is showing significant lags and Ljung-Box test says the lags are significant. So, the model is not able to capture all information from the data.
+* This is not a good candidate for the model.
+
+### SARIMA(2,1,6)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_216_CSS <- model.significance.and.error.measures(2,1,6,3,1,0,"CSS")
+residual.analysis(model = model_216_CSS)
+
+model_216_ML <- model.significance.and.error.measures(2,1,6,3,1,0,"ML")
+residual.analysis(model = model_216_ML)
+```
+
+* This model is bigger than the previous model having 2 AR , 6 MA and 3 seasonal AR parameters. So, this is not a good candidate based on Principle of Parsimony.
+* From model fitting we can see that except the highest order MA parameter none of the other MA parameters are significant. This also points to the fact that the model is not good.
+* Residuals plot suggests that it is white noise.
+* Normality of the residuals is confirmed by histogram, Q-Q plot and Shapiro test.
+* There are significant lags in the ACF plot and Ljung-Box test confirms this indicating the model didn't catch all the information.
+* This is not a good candidate for model
+
+### SARIMA(4,1,6)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_416_CSS <- model.significance.and.error.measures(4,1,6,3,1,0,"CSS")
+residual.analysis(model = model_416_CSS)
+
+model_416_ML <- model.significance.and.error.measures(4,1,6,3,1,0,"ML")
+residual.analysis(model = model_416_ML)
+```
+
+* This model is bigger than the previous model having 4 AR , 6 MA and 3 seasonal AR parameters. So, this is not a good candidate based on Principle of Parsimony.
+* The model fitting using CSS and ML methods shows that there are 2 insignificant MA parameters and 1 insignificant seasonal AR parameter. So, there is no need to consider this model at all.
+* Residuals plot suggests that it is white noise.
+* Normality of the residuals is confirmed by histogram, Q-Q plot and Shapiro test.
+* There are significant lags in the ACF plot and Ljung-Box test tells that the lags are not significant.
+* Overall, this model doesn't need to be considered.
+
+### SARIMA(5,1,6)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_516_CSS <- model.significance.and.error.measures(5,1,6,3,1,0,"CSS")
+residual.analysis(model = model_516_CSS)
+
+model_516_ML <- model.significance.and.error.measures(5,1,6,3,1,0,"ML")
+residual.analysis(model = model_516_CSS)
+```
+
+* This model is bigger than the previous model having 5 AR , 6 MA and 3 seasonal AR parameters. So, this is not a good candidate based on Principle of Parsimony.
+* The model fitting using CSS there are 3 MA parameters insignificant. ML method says that 1 AR, 4 MA and 1 seasonal MA parameters are insignificant. So, the model is not good.
+* Residuals plot suggests that it is white noise.
+* Normality of the residuals is confirmed by histogram, Q-Q plot and Shapiro test.
+* There are significant lags in the ACF plot and Ljung-Box test tells that the lags are not significant.
+* Overall, this model doesn't need to be considered.
+
+### SARIMA(3,1,3)x(3,1,0)_6
+
+```{r, warning=FALSE}
+model_313_CSS <- model.significance.and.error.measures(3,1,3,3,1,0,"CSS")
+residual.analysis(model = model_313_CSS)
+
+model_313_ML <- model.significance.and.error.measures(3,1,3,3,1,0,"ML")
+residual.analysis(model = model_313_ML)
+```
+
+* This model is smaller than the previous model but still having 3 AR , 3 MA and 3 seasonal AR parameters. The model is bigger than some of the smallest models which came good. So, this model cannot be eliminated as the previous ones.
+* The model fitting using CSS and ML methods say that two MA and AR parameters are insignificant. This is not good for the model. The number of insignificant parameters are more here.
+* Residuals plot suggests that it is white noise.
+* Normality of the residuals is confirmed by histogram, Q-Q plot and Shapiro test.
+* There are significant lags in the ACF plot and Ljung-Box test tells that the lags are not significant.
+* Overall, this model is not that bad. We can still consider the model based on the remaining tests.
+
+### AIC/BIC
+
+We have analysed every model now based on significance of the coefficients and using residual diagnostics. It is the time to shrink our model pool now based on the assessments. But before going through we can arrange the different models based on Akaike’s Information Criterion (AIC) and Bayesian Information Criterion (BIC). We have mentioned that some models are not worth considering. But still we have to check those models with the AIC/BIC criterion. As we have said before, the models having lower values for AIC or BIC is considered to be the good models.
+
+```{r, warning=FALSE}
+
+sort.score(AIC(model_413_ML, model_112_ML, model_113_ML, model_212_ML,
+               model_213_ML, model_513_ML, model_116_ML, model_216_ML, 
+               model_416_ML, model_516_ML, model_313_ML), score = "aic")
+
+sort.score(AIC(model_413_ML, model_112_ML, model_113_ML, model_212_ML,
+               model_213_ML, model_513_ML, model_116_ML, model_216_ML, 
+               model_416_ML, model_516_ML, model_313_ML, k = log(length(BC.electric_ts_data))),
+               score = "aic")
+```
+
+Both AIC and BIC are telling us that model 416 is the best model to go with. But as we have explained before there is one insignificant seasonal AR parameter and the model is too huge its better if we have a look at the error measures of the different models along with.
+
+```{r, warning=FALSE}
+print.data.frame(error_df)
+```
+
+* We can see that the error measures are low for 416 model. But because of the insignificant seasonal AR parameter and principle of parsimony it is not worth to consider this model. The same applies for model 516 as well where we can see that there are multiple coefficients including higher order MA coefficients being not significant. Models 212, 213 and 313 also have the same issue.
+* For models 112 and 216, we can see that there are insignificant parameters and Ljung-Box test suggests that there are significant lags which indicates the model is unable to capture some of the information.
+* The error measures of all the above models are all very near to each values and hence, this all points to the fact that we have choose model 113 as our bet from the results.
+* So based on significance of coefficients, capturing maximum information, lower AIC/BIC and error measures we have come to the conclusion that model 113 is our model to proceed.
+
+### Overfitting Models
+
+The next part here is we have to consider the overfitting models. We have come to the model 113 based on so many assumptions and considerations. So, its better we consider the overfitting models. The overfitting models which we have to consider here are models 114 and 213. but model 213 is already assessed and rejected. So, we have to analyse model 114. 
+
+```{r, warning=FALSE}
+model_114_CSS <- model.significance.and.error.measures(1,1,4,3,1,0,"CSS")
+residual.analysis(model = model_114_CSS)
+
+model_114_ML <- model.significance.and.error.measures(1,1,4,3,1,0,"CSS-ML")
+residual.analysis(model = model_114_ML)
+```
+
+* The model is having one extra MA parameter when compared with model 113. But it is not a huge difference. 
+* The model fitting says that except one MA parameter in CSS method all the other parameters are significant. This indicates the model is really good.
+* The standardized residuals plot is showing up as white noise.
+* Normality of the standard residuals is evident from the histogram, Q-Q plot and Shapiro test.
+* The significant lags (lag 4) is ruled out by Ljung-Box test. 
+* Overall, the model is a really good candidate to proceed with.
+
+Now, we will see the AIC/BIC analysis and error measures of the model. This will help us to compare the model with model 113.
+
+```{r, warning=FALSE}
+sort.score(AIC(model_413_ML, model_112_ML, model_113_ML, model_212_ML,
+               model_213_ML, model_513_ML, model_116_ML, model_216_ML, 
+               model_416_ML, model_516_ML, model_313_ML, model_114_ML), score = "aic")
+
+sort.score(AIC(model_413_ML, model_112_ML, model_113_ML, model_212_ML,
+               model_213_ML, model_513_ML, model_116_ML, model_216_ML, 
+               model_416_ML, model_516_ML, model_313_ML, model_114_ML, 
+               k = log(length(BC.electric_ts_data))),
+               score = "aic")
+```
+
+From both AIC and BIC we can see that the values are lower for model 114 when compared with model 113. This tells us that model 114 is a better choice than model 113. We will enusure this with comparing the error measures of the models.
+
+```{r, warning=FALSE}
+print.data.frame(error_df[c("SARIMA 1 1 3 (3,1,0)", "SARIMA 1 1 4 (3,1,0)"),])
+```
+
+Here, apart from the mean error all other error values are lesser for model 114 when compared with model 113. This drives us to the important conclusion that it is not model 113 but model 114 is the best fitting model.
+
+**Model finally selected --> SARIMA(1,1,4)x(3,1,0)_6**
+
+## Forecasting
+
+## Conclusion
+
+## References
